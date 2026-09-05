@@ -211,12 +211,17 @@ def backtest_time_range(df, entry_h, entry_m, exit_h, exit_m, direction='long'):
     max_spread = df.attrs['spread_mean'] * DEFAULT_SPREAD_MULTIPLIER
 
     entry_mask = (df['hour'] == entry_h) & (df['minute'] == entry_m) & (df['spread_pips'] <= max_spread)
-    exit_mask = (df['hour'] == exit_h) & (df['minute'] == exit_m)
+    # 保持時間（分）: エグジット時刻がエントリー時刻より前なら翌日扱い
+    hold_minutes = ((exit_h * 60 + exit_m) - (entry_h * 60 + entry_m)) % (24 * 60)
+    if hold_minutes == 0:
+        hold_minutes = 24 * 60
 
-    entries = df[entry_mask][['date', 'open', 'spread_pips', 'weekday']].copy()
-    exits = df[exit_mask][['date', 'close', 'spread_pips']].copy()
+    entries = df[entry_mask][['time', 'date', 'open', 'spread_pips', 'weekday']].copy()
+    entries['exit_time'] = entries['time'] + timedelta(minutes=hold_minutes)
 
-    trades = pd.merge(entries, exits, on='date', suffixes=('_entry', '_exit'))
+    # エントリー時刻 + 保持時間 のタイムスタンプでエグジット足を引く（同日結合による先読みを防止）
+    exits = df[['time', 'close', 'spread_pips']].rename(columns={'time': 'exit_time'})
+    trades = pd.merge(entries, exits, on='exit_time', suffixes=('_entry', '_exit'))
 
     if len(trades) == 0:
         return None
